@@ -1,7 +1,13 @@
 import React, { useEffect, useState } from "react";
-import { ethers } from "ethers";
+import { Contract, ethers } from "ethers";
 import './App.css';
 import abi from "./utils/WavePortal.json";
+
+interface Wave {
+  waver: string;
+  message: string;
+  timestamp: number;
+}
 
 const getEthereumObject = () => window.ethereum;
 
@@ -35,6 +41,7 @@ const findMetaMaskAccount = async () => {
 };
 
 export default function App() {
+  const [allWaves, setAllWaves] = useState<Wave[]>([]);
   const [currentAccount, setCurrentAccount] = useState("");
 
   /**
@@ -45,9 +52,43 @@ export default function App() {
 
   /**
    * This is our contract address on the Goerli test network.
-   * https://goerli.etherscan.io/address/0x813Ef809589Fc3e31CC06d1F81364aAb7E8fB565
+   * https://goerli.etherscan.io/address/0x69aA49d1808db9F6CDcD766cBc6F267c26a706B2
    */
-  const contractAddress = "0x813Ef809589Fc3e31CC06d1F81364aAb7E8fB565";
+  const contractAddress = import.meta.env.VITE_CONTRACT_ADDRESS;
+
+  /**
+   * Create a method that gets all waves from your contract
+   */
+  const getAllWaves = async () => {
+    try {
+      const { ethereum } = window;
+      if (ethereum) {
+        const provider = new ethers.providers.Web3Provider(ethereum);
+        const signer = provider.getSigner();
+        const wavePortalContract = new ethers.Contract(contractAddress, contractABI, signer);
+
+        /*
+        * Call the getAllWaves method from your Smart Contract
+        */
+        const waves: Wave[] = await wavePortalContract.getAllWaves();
+        console.log("Retrieved all waves...", waves);
+        const wavesCleaned: Wave[] = waves.map((wave: Wave) => ({
+            waver: wave.waver,
+            message: wave.message,
+            timestamp: wave.timestamp,
+        }));
+
+        /*
+        * Store our data in React State
+        */
+        setAllWaves(wavesCleaned);
+      } else {
+        console.log("Ethereum object doesn't exist!")
+      }
+    } catch (error) {
+      console.log(error);
+    }
+  };
 
   const connectWallet = async () => {
     try {
@@ -86,7 +127,7 @@ export default function App() {
         console.log("Retrieved total wave count...", count.toNumber());
 
         // Execute the actual wave from your smart contract
-        const waveTxn = await wavePortalContract.wave();
+        const waveTxn = await wavePortalContract.wave("Hi Eva!", { gasLimit: 300000 });
         console.log("Mining...", waveTxn.hash);
 
         await waveTxn.wait();
@@ -101,7 +142,7 @@ export default function App() {
     } catch (error) {
       console.log(error);
     }
-}
+  };
 
   useEffect(() => {
     const getMetaMaskAccount = async () => {
@@ -116,6 +157,40 @@ export default function App() {
     }
 
     getMetaMaskAccount();
+  }, []);
+
+  useEffect(() => {
+    let wavePortalContract: Contract | null = null;
+  
+    const onNewWave = (waver: string, timestamp: number, message: string) => {
+      console.log("NewWave", waver, timestamp, message);
+      setAllWaves((prevState: Wave[]) => {
+        const list: Wave[] = [
+          ...prevState,
+          {
+            waver,
+            message,
+            timestamp,
+          },
+        ]
+
+        return list;
+      });
+    };
+  
+    if (window.ethereum) {
+      const provider = new ethers.providers.Web3Provider(window.ethereum);
+      const signer = provider.getSigner();
+  
+      wavePortalContract = new ethers.Contract(contractAddress, contractABI, signer);
+      wavePortalContract.on("NewWave", onNewWave);
+    }
+  
+    return () => {
+      if (wavePortalContract) {
+        wavePortalContract.off("NewWave", onNewWave);
+      }
+    };
   }, []);
   
   return (
@@ -134,14 +209,20 @@ export default function App() {
           Wave at Me
         </button>
 
-       {/*
-         * If there is no currentAccount render this button
-         */}
         {!currentAccount && (
           <button className="waveButton" onClick={connectWallet}>
             Connect Wallet
           </button>
         )}
+
+        {allWaves.length > 0 && allWaves.map((wave, index) => {
+          return (
+            <div key={index} style={{ backgroundColor: "OldLace", marginTop: "16px", padding: "8px" }}>
+              <div>Address: {wave.waver}</div>
+              <div>Time: {new Date(wave.timestamp * 1000).toLocaleString()}</div>
+              <div>Message: {wave.message}</div>
+            </div>)
+        })}
       </div>
     </div>
   );
